@@ -20,15 +20,15 @@ const (
 )
 
 type Result struct {
-	Host         string  `json:"host"`
-	Bytes        int64   `json:"bytes"`
-	HeadersMS    int64   `json:"headers_ms"`
-	DurationMS   int64   `json:"duration_ms"`
-	Mbps         float64 `json:"mbps"`
-	TransferMS   int64   `json:"transfer_ms"`
-	TransferMbps float64 `json:"transfer_mbps"`
-	HTTPStatus   int     `json:"http_status,omitempty"`
-	Route        string  `json:"route"`
+	Host         string   `json:"host"`
+	Bytes        int64    `json:"bytes"`
+	HeadersMS    int64    `json:"headers_ms"`
+	DurationMS   int64    `json:"duration_ms"`
+	Mbps         float64  `json:"mbps"`
+	TransferMS   *int64   `json:"transfer_ms,omitempty"`
+	TransferMbps *float64 `json:"transfer_mbps,omitempty"`
+	HTTPStatus   int      `json:"http_status,omitempty"`
+	Route        string   `json:"route"`
 }
 
 func Check(ctx context.Context, mib int) (Result, error) {
@@ -70,6 +70,10 @@ func newTransport(route *diagnostic.HTTPRoute) *http.Transport {
 }
 
 func download(ctx context.Context, transport http.RoundTripper, endpoint string, size int64, route func() string, onProgress func(bytes, total int64)) (Result, error) {
+	return downloadWithClock(ctx, transport, endpoint, size, route, onProgress, time.Now)
+}
+
+func downloadWithClock(ctx context.Context, transport http.RoundTripper, endpoint string, size int64, route func() string, onProgress func(bytes, total int64), now func() time.Time) (Result, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s?bytes=%d", endpoint, size), nil)
 	if err != nil {
 		return Result{}, diagnostic.Error{Code: diagnostic.InvalidInput}
@@ -77,7 +81,7 @@ func download(ctx context.Context, transport http.RoundTripper, endpoint string,
 	request.Header.Set("Accept-Encoding", "identity")
 	request.Header.Set("Cache-Control", "no-store, no-cache")
 
-	started := time.Now()
+	started := now()
 	// RoundTrip neither follows redirects nor parses their private location values.
 	response, err := transport.RoundTrip(request)
 	result := Result{Host: request.URL.Hostname(), Route: route()}
@@ -85,7 +89,7 @@ func download(ctx context.Context, transport http.RoundTripper, endpoint string,
 		return result, diagnostic.Error{Code: diagnostic.HTTPCode(err, result.Route)}
 	}
 	defer response.Body.Close()
-	headersAt := time.Now()
+	headersAt := now()
 	result.HTTPStatus = response.StatusCode
 	result.HeadersMS = headersAt.Sub(started).Milliseconds()
 	switch response.StatusCode {
@@ -114,14 +118,18 @@ func download(ctx context.Context, transport http.RoundTripper, endpoint string,
 	if n != size {
 		return result, diagnostic.Error{Code: diagnostic.HTTPFailure}
 	}
-	finished := time.Now()
+	finished := now()
 	duration, transfer := finished.Sub(started), finished.Sub(headersAt)
-	if duration <= 0 || transfer <= 0 {
+	if duration <= 0 {
 		return result, diagnostic.Error{Code: diagnostic.ExternalFailure}
 	}
-	result.DurationMS, result.TransferMS = duration.Milliseconds(), transfer.Milliseconds()
+	result.DurationMS = duration.Milliseconds()
 	result.Mbps = float64(n) * 8 / duration.Seconds() / 1e6
-	result.TransferMbps = float64(n) * 8 / transfer.Seconds() / 1e6
+	if transfer > 0 {
+		milliseconds := transfer.Milliseconds()
+		mbps := float64(n) * 8 / transfer.Seconds() / 1e6
+		result.TransferMS, result.TransferMbps = &milliseconds, &mbps
+	}
 	return result, nil
 }
 

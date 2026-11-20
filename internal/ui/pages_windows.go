@@ -347,8 +347,12 @@ func (a *nativeWindow) renderSpeed() {
 			"No download measurement has been run. The test requests a body up to the selected size."))
 		return
 	}
+	transfer := a.tr("Gövde aktarımı  Ölçüm çözünürlüğünün altında", "Body transfer  Below timer resolution")
+	if result.TransferMbps != nil && result.TransferMS != nil {
+		transfer = fmt.Sprintf("%s  %.2f Mbps · %d ms", a.tr("Gövde aktarımı", "Body transfer"), *result.TransferMbps, *result.TransferMS)
+	}
 	lines := []string{fmt.Sprintf("%s  %.2f Mbps", a.tr("Toplam indirme", "End-to-end download"), result.Mbps),
-		fmt.Sprintf("%s  %.2f Mbps · %d ms", a.tr("Gövde aktarımı", "Body transfer"), result.TransferMbps, result.TransferMS),
+		transfer,
 		fmt.Sprintf("%s  %s · %.0f MiB", a.tr("Uç nokta", "Endpoint"), result.Host, float64(result.Bytes)/(1<<20)),
 		fmt.Sprintf("%s  %d ms · %s  %d ms", a.tr("Toplam", "Total"), result.DurationMS,
 			a.tr("HTTP başlıkları", "HTTP headers"), result.HeadersMS),

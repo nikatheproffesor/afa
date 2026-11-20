@@ -184,8 +184,11 @@ func runSpeed(ctx context.Context, started time.Time, mib, count int, ops operat
 		}
 		return outcome{value: result, text: text, code: 1, toStderr: true}
 	}
-	text := fmt.Sprintf("%s\nİndirme  %.2f Mbps (%d MiB)\nHTTP başlıkları  %d ms · Toplam  %d ms · Aktarım  %.2f Mbps",
-		result.Host, result.Mbps, mib, result.HeadersMS, result.DurationMS, result.TransferMbps)
+	text := fmt.Sprintf("%s\nİndirme  %.2f Mbps (%d MiB)\nHTTP başlıkları  %d ms · Toplam  %d ms",
+		result.Host, result.Mbps, mib, result.HeadersMS, result.DurationMS)
+	if result.TransferMbps != nil {
+		text += fmt.Sprintf(" · Aktarım  %.2f Mbps", *result.TransferMbps)
+	}
 	if result.MedianMbps != nil {
 		text += fmt.Sprintf("\n%d örnek · Ortanca %.2f Mbps", len(result.Samples), *result.MedianMbps)
 	}

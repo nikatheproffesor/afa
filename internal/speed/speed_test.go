@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"afa/internal/diagnostic"
 )
@@ -39,7 +40,8 @@ func TestDownload(t *testing.T) {
 			}))
 			defer server.Close()
 
-			result, err := download(context.Background(), server.Client().Transport, server.URL, 4, func() string { return diagnostic.RouteDirect }, nil)
+			result, err := downloadWithClock(context.Background(), server.Client().Transport, server.URL, 4, directRoute, nil,
+				testClock(0, time.Millisecond, 2*time.Millisecond))
 			if test.wantResult {
 				if err != nil || result.Bytes != 4 || result.Mbps <= 0 {
 					t.Fatalf("download returned %+v, %v", result, err)
@@ -75,21 +77,40 @@ func TestDownloadProgressAndReadCap(t *testing.T) {
 			return &http.Response{StatusCode: http.StatusOK, ContentLength: -1, Body: body}, nil
 		})
 		var seen []int64
-		report, err := download(context.Background(), transport, "https://example.invalid", 4, directRoute, func(bytes, total int64) {
+		report, err := downloadWithClock(context.Background(), transport, "https://example.invalid", 4, directRoute, func(bytes, total int64) {
 			seen = append(seen, bytes)
 			if total != 4 {
 				t.Errorf("unexpected progress total: %d", total)
 			}
-		})
+		}, testClock(0, time.Millisecond, 2*time.Millisecond))
 		if tooLong {
 			if diagnostic.CodeOf(err, "") != diagnostic.HTTPFailure || report.Bytes != 5 || reader.Len() != 3 ||
 				!reflect.DeepEqual(seen, []int64{2, 4, 4}) {
 				t.Fatalf("oversized body result was %+v, %v, progress=%v", report, err, seen)
 			}
-		} else if err != nil || report.Bytes != 4 || report.Mbps <= 0 || report.TransferMbps <= 0 ||
+		} else if err != nil || report.Bytes != 4 || report.Mbps <= 0 || report.TransferMbps == nil || *report.TransferMbps <= 0 ||
 			!reflect.DeepEqual(seen, []int64{2, 4}) {
 			t.Fatalf("exact body result was %+v, %v, progress=%v", report, err, seen)
 		}
+	}
+}
+
+func TestDownloadWithTransferBelowClockResolution(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, ContentLength: 4, Body: io.NopCloser(strings.NewReader("1234"))}, nil
+	})
+	report, err := downloadWithClock(context.Background(), transport, "https://example.invalid", 4, directRoute, nil,
+		testClock(0, 2*time.Millisecond, 2*time.Millisecond))
+	if err != nil || report.DurationMS != 2 || report.Mbps <= 0 || report.TransferMS != nil || report.TransferMbps != nil {
+		t.Fatalf("expected a total measurement with no transfer-only measurement: %+v, %v", report, err)
+	}
+}
+
+func testClock(offsets ...time.Duration) func() time.Time {
+	return func() time.Time {
+		next := time.Unix(0, 0).Add(offsets[0])
+		offsets = offsets[1:]
+		return next
 	}
 }
 
